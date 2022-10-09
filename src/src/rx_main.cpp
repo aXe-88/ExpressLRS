@@ -66,6 +66,7 @@ uint8_t antenna = 0;    // which antenna is currently in use
 hwTimer hwTimer;
 POWERMGNT POWERMGNT;
 PFD PFDloop;
+GENERIC_CRC8 ls_crc(0x07);
 GENERIC_CRC14 ota_crc(ELRS_CRC14_POLY);
 ELRS_EEPROM eeprom;
 RxConfig config;
@@ -330,6 +331,10 @@ bool ICACHE_RAM_ATTR HandleSendTelemetryResponse()
     uint8_t maxLength;
     uint8_t packageIndex;
     uint8_t modresult = (NonceRX + 1) % TLMratioEnumToValue(ExpressLRS_currAirRate_Modparams->TLMinterval);
+
+#if defined(AIRPORT_RX_TLM_FORCE_OFF)
+    return false; // force off telemetry, usefull for secondary rx
+#endif    
 
     if ((connectionState == disconnected) || (ExpressLRS_currAirRate_Modparams->TLMinterval == TLM_RATIO_NO_TLM) || (alreadyTLMresp == true) || (modresult != 0))
     {
@@ -1157,12 +1162,36 @@ static void HandleUARTin()
 
 static void HandleUARTout()
 {
-    #if defined(USE_AIRPORT_AT_BAUD)
-        if (apOutputBuffer.size())
-        {
-            Serial.write(apOutputBuffer.pop());
-        }
-    #endif
+#if defined(USE_AIRPORT_AT_BAUD)
+    if (apOutputBuffer.size())
+    {
+        Serial.write(apOutputBuffer.pop());
+    }
+#if defined(AIRPORT_RX_SEND_LS)
+    static unsigned long lastUpdate = 0;
+    if ((lastUpdate + AIRPORT_RX_SEND_LS) < millis())
+    {
+        lastUpdate = millis();
+        //TODO: framing
+        uint8_t buffer[15];
+        buffer[0] = '$';
+        buffer[1] = 'L';
+        buffer[2] = crsf.LinkStatistics.uplink_RSSI_1;
+        buffer[3] = crsf.LinkStatistics.uplink_RSSI_2;
+        buffer[4] = crsf.LinkStatistics.uplink_Link_quality;
+        buffer[5] = crsf.LinkStatistics.uplink_SNR;
+        buffer[6] = crsf.LinkStatistics.active_antenna;
+        buffer[7] = crsf.LinkStatistics.rf_Mode;
+        buffer[8] = crsf.LinkStatistics.uplink_TX_Power;
+        buffer[9] = crsf.LinkStatistics.downlink_RSSI;
+        buffer[10]= crsf.LinkStatistics.downlink_Link_quality;
+        buffer[11]= crsf.LinkStatistics.downlink_SNR;
+        buffer[12]=ls_crc.calc(buffer,12,0);
+        Serial.write(buffer,13);
+        //TODO: crc
+    }
+#endif //AIRPORT_RX_SEND_LS
+#endif //USE_AIRPORT_AT_BAUD
 }
 
 static void setupRadio()
